@@ -136,3 +136,13 @@ class AtolAPI:
                 "name": self.cashier_name
             }
         })
+
+    def print_previous(self):
+        """
+        Печать копии последнего чека
+
+        :return: JSON результат
+        """
+        return self.__add_task({
+            "type": "printLastReceiptCopy",
+        })
