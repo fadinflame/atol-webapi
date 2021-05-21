@@ -3,10 +3,11 @@ import random
 import string
 from exceptions import *
 import time
+import logging
 
 
 class AtolAPI:
-    def __init__(self, host, port, cashier_name=""):
+    def __init__(self, host, port, cashier_name):
         """
         Инициализация экземпляра Atol API
 
@@ -18,6 +19,8 @@ class AtolAPI:
         self.port = port
         self.web_url = f"http://{host}:{port}/"
         self.cashier_name = cashier_name
+        logging.basicConfig(filename="atol-webapi.log", format='[%(asctime)s] - %(message)s', level=logging.INFO)
+        logging.info(f"Инициализация Atol API...")
         if not self.__ping_webserver():
             raise AtolInitError(f"Couldn't connect to Atol Web Server on '{self.web_url}'")
 
@@ -79,8 +82,10 @@ class AtolAPI:
             ]
         }
         request = self.__call_api("POST", data=json_data)
+        logging.info(f"Добавление задания...\nJSON: {json_data}")
         if request.status_code == 201:
-            time.sleep(1)
+            logging.info(f"Задание создано. Ожидаем 5 секунд...")
+            time.sleep(5)
             return self.__get_request_result(json_data["uuid"])
         else:
             raise AtolRequestError(f"Unsuccessful add task request: {request.text}")
@@ -94,3 +99,40 @@ class AtolAPI:
         dict_data = {"type": "getShiftStatus"}
         task = self.__add_task(dict_data)
         return task["result"]["shiftStatus"]["state"]
+
+    def close_shift(self):
+        """
+        Закрытие смены
+
+        :return: Если статус смены подходит - JSON ответ, если нет - строка состояния
+        """
+        shift_status = self.get_shift_status()
+        if shift_status == "closed":
+            return "Смена уже закрыта"
+
+        return self.__add_task({
+            "type": "closeShift",
+            "operator": {
+                "name": self.cashier_name
+            }
+        })
+
+    def open_shift(self):
+        """
+        Открытие смены
+
+        :return: Если статус смены подходит - JSON ответ, если нет - строка состояния
+        """
+        shift_status = self.get_shift_status()
+        if shift_status == "opened":
+            return "Смена уже открыта"
+        elif shift_status == "expired":
+            self.close_shift()
+            return "Смена истекла и была принудительно закрыта"
+
+        return self.__add_task({
+            "type": "openShift",
+            "operator": {
+                "name": self.cashier_name
+            }
+        })
