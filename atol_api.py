@@ -7,7 +7,7 @@ import logging
 
 
 class AtolAPI:
-    def __init__(self, host, port, cashier_name):
+    def __init__(self, host, port, cashier_name=""):
         """
         Инициализация экземпляра Atol API
 
@@ -15,22 +15,20 @@ class AtolAPI:
         :param port: порт сервера
         :param cashier_name: (Опционально) Кассир
         """
-        self.host = host
-        self.port = port
-        self.web_url = f"http://{host}:{port}/"
-        self.cashier_name = cashier_name
+        self.__web_url = f"http://{host}:{port}/"
+        self.__cashier_name = {"name": cashier_name} if cashier_name else ""
         logging.basicConfig(filename="atol-webapi.log", format='[%(asctime)s] - %(message)s', level=logging.INFO)
         logging.info(f"Инициализация Atol API...")
         if not self.__ping_webserver():
-            raise AtolInitError(f"Couldn't connect to Atol Web Server on '{self.web_url}'")
+            raise AtolInitError(f"Couldn't connect to Atol Web Server on '{self.__web_url}'")
 
     def __str__(self):
-        return f"AtolAPI Instance<{self.web_url}>"
+        return f"AtolAPI Instance<{self.__web_url}>"
 
     def __ping_webserver(self):
         """ Проверка соединения с Atol сервером """
         try:
-            return requests.get(self.web_url, timeout=3).status_code == 200
+            return requests.get(self.__web_url, timeout=3).status_code == 200
         except requests.exceptions.ConnectTimeout:
             return False
 
@@ -57,7 +55,7 @@ class AtolAPI:
             raise AtolRequestError("Calling API on POST method when data is None")
         elif data is not None and method.lower() == "get":
             data = {}
-        request = requests.request(method, self.web_url + url, json=data)
+        request = requests.request(method, self.__web_url + url, json=data)
         return request
 
     def __get_request_result(self, uuid):
@@ -110,12 +108,14 @@ class AtolAPI:
         if shift_status == "closed":
             return "Смена уже закрыта"
 
-        return self.__add_task({
+        dict_data = {
             "type": "closeShift",
-            "operator": {
-                "name": self.cashier_name
-            }
-        })
+        }
+
+        if self.__cashier_name:
+            dict_data["operator"] = self.__cashier_name
+
+        return self.__add_task(dict_data)
 
     def open_shift(self):
         """
@@ -130,12 +130,14 @@ class AtolAPI:
             self.close_shift()
             return "Смена истекла и была принудительно закрыта"
 
-        return self.__add_task({
+        dict_data = {
             "type": "openShift",
-            "operator": {
-                "name": self.cashier_name
-            }
-        })
+        }
+
+        if self.__cashier_name:
+            dict_data["operator"] = self.__cashier_name
+
+        return self.__add_task(dict_data)
 
     def print_previous(self):
         """
