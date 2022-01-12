@@ -3,7 +3,6 @@ import random
 import string
 from exceptions import *
 import time
-import logging
 
 
 class AtolAPI:
@@ -17,8 +16,6 @@ class AtolAPI:
         """
         self.__web_url = f"http://{host}:{port}/"
         self.__cashier_name = {"name": cashier_name} if cashier_name else ""
-        logging.basicConfig(filename="atol-webapi.log", format='[%(asctime)s] - %(message)s', level=logging.INFO)
-        logging.info(f"Инициализация Atol API...")
         if not self.__ping_webserver():
             raise AtolInitError(f"Couldn't connect to Atol Web Server on '{self.__web_url}'")
 
@@ -58,7 +55,7 @@ class AtolAPI:
         request = requests.request(method, self.__web_url + url, json=data)
         return request
 
-    def __get_request_result(self, uuid):
+    def __get_request_result(self, uuid: str) -> dict:
         """
         Получение результата исполненной задачи
         :param uuid: идентификатор отправленной задачи
@@ -66,7 +63,7 @@ class AtolAPI:
         """
         return self.__call_api("GET", url=f"requests/{uuid}").json()["results"][0]
 
-    def __add_task(self, dict_data):
+    def __add_task(self, dict_data: dict) -> dict:
         """
         Добавляет задачу для Веб-сервера
 
@@ -80,9 +77,7 @@ class AtolAPI:
             ]
         }
         request = self.__call_api("POST", data=json_data)
-        logging.info(f"Добавление задания...\nJSON: {json_data}")
         if request.status_code == 201:
-            logging.info(f"Задание создано. Ожидаем 5 секунд...")
             time.sleep(5)
             return self.__get_request_result(json_data["uuid"])
         else:
@@ -98,7 +93,7 @@ class AtolAPI:
         task = self.__add_task(dict_data)
         return task["result"]["shiftStatus"]["state"]
 
-    def close_shift(self):
+    def close_shift(self, is_web=False):
         """
         Закрытие смены
 
@@ -110,6 +105,7 @@ class AtolAPI:
 
         dict_data = {
             "type": "closeShift",
+            "electronically": is_web
         }
 
         if self.__cashier_name:
@@ -117,7 +113,7 @@ class AtolAPI:
 
         return self.__add_task(dict_data)
 
-    def open_shift(self):
+    def open_shift(self, is_web=False):
         """
         Открытие смены
 
@@ -132,6 +128,7 @@ class AtolAPI:
 
         dict_data = {
             "type": "openShift",
+            "electronically": is_web
         }
 
         if self.__cashier_name:
@@ -148,3 +145,77 @@ class AtolAPI:
         return self.__add_task({
             "type": "printLastReceiptCopy",
         })
+
+    def new_fiscal_doc(self, tp: str, items: list, tax_type: str, payment_type="cash", payment_sum=0.00, client="",
+                       is_web=False, use_separator=True):
+        """
+        Создать новый фискальный документ
+
+
+        :param tp: Тип документа
+        :param items: Элементы документа
+        :param tax_type: Вид налогообложения
+        :param payment_type: Тип оплаты (cash, electronically)
+        :param payment_sum: Оплата от клиента
+        :param client: Номер телефона или email клиента
+        :param is_web: Электронный ли чек
+        :param use_separator: Использовать разделитель между позициями
+        :return: JSON результат
+        """
+        types = ("sell", "buy", "sellReturn", "buyReturn")
+        if tp not in types:
+            raise AtolNewDocError(errors=[f"The type must be one of the values: {types}"])
+        # подготавливаем запрос к кассе с параметрами
+        json_data = {
+            "type": tp,
+            "taxationType": tax_type,
+            "electronically": is_web,
+            "ignoreNonFiscalPrintErrors": False,
+            "items": [],
+            "payments": [
+                {
+                    "type": payment_type,
+                    "sum": payment_sum
+                }
+            ],
+            "total": 0.00
+        }
+
+        if client:
+            json_data["clientInfo"] = {"emailOrPhone": client}
+
+        if self.__cashier_name:
+            json_data["operator"] = self.__cashier_name
+
+        # Добавляем позиции товаров/услуг в чек
+        for product in items:
+            keys = ('price', 'quantity', 'amount', 'tax', 'type', 'paymentObject', 'paymentMethod')
+            for key in keys:
+                if key not in product:
+                    raise AtolNewDocError(
+                        message=f"'{key}' key is required. Read more at https://integration.atol.ru/api")
+
+            # считаем сумму позиции по кол-ву и стоимости, если не указано
+            if product["amount"] == 0 or product["amount"] is None:
+                product["amount"] = product["price"] * product["quantity"]
+
+            json_data["items"].append(product)
+            json_data["total"] += product["amount"]
+
+            # добавляем разделитель между позициями
+            if use_separator:
+                json_data["items"].append({
+                    "type": "text",
+                    "text": "--------------------------------",
+                    "alignment": "left",
+                    "font": 0,
+                    "doubleWidth": False,
+                    "doubleHeight": False
+                })
+
+        # Если не не указано итого, то записываем, то что посчитали
+        if json_data["payments"][0]["sum"] < json_data["total"]:
+            json_data["payments"][0]["sum"] = json_data["total"]
+
+        task = self.__add_task(json_data)
+        return task
